@@ -21,7 +21,7 @@ def main():
     descriptors0 = data['descriptors0']
     descriptors1 = data['descriptors1']
     matches_initial = data['matches']
-    scores_initial = data['scores0']
+    scores0 = data['scores0']
 
     # Camera intrinsic matrix.
     K = np.array([[1.415e+03, 0.0,      7.075e+02],
@@ -40,6 +40,7 @@ def main():
     points3d = pts3d_init.copy()
     kp_existing = keypoints0.copy()    # Base keypoints for the initial image.
     desc_existing = descriptors0.copy().T  # Base descriptors for the initial image.
+    scores_existing = scores0.copy()
 
     # Setup SuperGlue matching via the evaluator.
     opt = parse_arguments()
@@ -56,7 +57,7 @@ def main():
         # Register the new image using SuperGlue-based matching.
         R_new, t_new, inliers, _ = register_new_image(
             kp_existing, points3d, kp_new,
-            desc_existing.T, desc_new, scores_initial, scores_new,
+            desc_existing.T, desc_new, scores_existing, scores_new,
             K, evaluator.matching, device='cuda'
         )
 
@@ -83,6 +84,7 @@ def main():
         # Update the reference keypoints and descriptors by merging new features.
         kp_existing = np.vstack((kp_existing, kp_new))
         desc_existing = np.vstack((desc_existing, desc_new.T))
+        scores_existing = np.hstack((scores_existing, scores_new))
 
     # Plot the final 3D point cloud.
     plot_point_cloud(points3d)
