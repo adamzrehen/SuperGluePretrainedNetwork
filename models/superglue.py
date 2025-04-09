@@ -242,8 +242,11 @@ class SuperGlue(nn.Module):
             }
 
         # Keypoint normalization.
-        kpts0 = normalize_keypoints(kpts0, data['image0'].shape)
-        kpts1 = normalize_keypoints(kpts1, data['image1'].shape)
+        image0_shape = data['image0'].shape  if 'image0' in data else torch.Size([1, 1, 480, 640])
+        image1_shape = data['image1'].shape if 'image1' in data else torch.Size([1, 1, 480, 640])
+
+        kpts0 = normalize_keypoints(kpts0, image0_shape)
+        kpts1 = normalize_keypoints(kpts1, image1_shape)
 
         # Keypoint MLP encoder.
         desc0 = desc0 + self.kenc(kpts0, data['scores0'])
