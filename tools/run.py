@@ -29,9 +29,10 @@ def main():
                   [0.0,       0.0,      1.0]])
 
     # Estimate the initial pose from the first pair.
-    R, t, mask_pose, pts1, pts2 = estimate_initial_pose(keypoints0, keypoints1,
-                                                        matches_initial, K)
+    R, t, mask_pose, pts1, pts2, valid_kp_indices = estimate_initial_pose(keypoints0, keypoints1, matches_initial, K)
+    valid_kp_indices = valid_kp_indices[(mask_pose.ravel() > 0)]
     pts3d_init = triangulate_points(K, R, t, pts1, pts2, mask_pose)
+    plot_point_cloud(pts3d_init)
 
     # Initialize camera poses and 3D point cloud.
     camera_poses = {}
@@ -47,7 +48,7 @@ def main():
     evaluator = SuperGlueEvaluator(opt)
 
     # Process subsequent images.
-    for i in tqdm.tqdm(range(2, len(keypoint_files))):
+    for i in tqdm.tqdm(range(1, len(keypoint_files), 1)):
         data = np.load(keypoint_files[i])
         # Assume new image keypoints are stored under key 'keypoints1'
         kp_new = data['keypoints1']
@@ -56,7 +57,7 @@ def main():
 
         # Register the new image using SuperGlue-based matching.
         R_new, t_new, inliers, _ = register_new_image(
-            kp_existing, points3d, kp_new,
+            kp_existing, points3d, valid_kp_indices, kp_new,
             desc_existing.T, desc_new, scores_existing, scores_new,
             K, evaluator.matching, device='cuda'
         )
@@ -78,6 +79,15 @@ def main():
                 # Merge the newly triangulated points into the global point cloud.
                 points3d = np.vstack((points3d, new_pts3d))
                 print(f"Image {i}: Triangulated {new_pts3d.shape[0]} new points.")
+
+                # 👇 NEW: Update valid_kp_indices
+                kp_new_start_idx = len(kp_existing)  # Starting index for new keypoints in kp_existing
+                new_valid_indices = np.array(
+                    # [m.queryIdx for m in additional_matches] +
+                    [m.trainIdx + kp_new_start_idx for m in additional_matches],
+                    dtype=np.int32
+                )
+                valid_kp_indices = np.unique(np.concatenate((valid_kp_indices, new_valid_indices)))
             else:
                 print(f"Image {i}: Not enough additional matches for triangulation.")
 

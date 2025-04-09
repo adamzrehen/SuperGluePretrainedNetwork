@@ -30,7 +30,7 @@ def plot_point_cloud(points, point_size=5, point_color='b', title="3D Point Clou
     ax.set_zlabel("Z")
     ax.set_title(title)
 
-    plt.show()
+    plt.show(block=True)
 
 
 # Example usage:

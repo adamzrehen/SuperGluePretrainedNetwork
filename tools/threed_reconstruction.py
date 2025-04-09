@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import torch
+from covariance_analysis import check_spatial_distribution
 
 
 def estimate_initial_pose(kp1, kp2, matches, K):
@@ -27,6 +28,7 @@ def estimate_initial_pose(kp1, kp2, matches, K):
 
     # Select valid matches (assuming invalid match indices are marked by -1)
     valid = matches >= 0
+    valid_kp_indices = np.where(valid)[0]
 
     # Gather the matching points
     pts1 = kp1[valid]               # Shape: (num_valid, 2)
@@ -38,7 +40,7 @@ def estimate_initial_pose(kp1, kp2, matches, K):
     # Recover the relative camera pose from the essential matrix
     _, R, t, mask_pose = cv2.recoverPose(E, pts1, pts2, K)
 
-    return R, t, mask_pose, pts1, pts2
+    return R, t, mask_pose, pts1, pts2, valid_kp_indices
 
 
 def triangulate_points(K, R, t, pts1, pts2, mask_pose):
@@ -60,6 +62,8 @@ def triangulate_points(K, R, t, pts1, pts2, mask_pose):
     """
     # Filter out the inlier points using the mask from recoverPose
     inlier_mask = (mask_pose.ravel() > 0)
+
+    # Filter points from both images to retain only the inliers.
     pts1_inliers = pts1[inlier_mask]  # shape: (N_inliers, 2)
     pts2_inliers = pts2[inlier_mask]  # shape: (N_inliers, 2)
 
@@ -97,8 +101,8 @@ def triangulate_new_points_from_two_views(K, R1, t1, R2, t2, pts1, pts2):
     return new_pts3d
 
 
-def register_new_image(kp_existing, pts3d_existing, kp_new, desc_existing, desc_new, scores_existing, scores_new,
-                       K, matching, device='cpu'):
+def register_new_image(kp_existing, pts3d_existing, valid_kp_indices, kp_new, desc_existing, desc_new, scores_existing,
+                       scores_new, K, matching, device='cpu'):
     """
     Given previously reconstructed 3D points (associated with 2D keypoints in kp_existing)
     and a new image (with its keypoints and descriptors), find 2D-3D correspondences and register the new image.
@@ -126,18 +130,22 @@ def register_new_image(kp_existing, pts3d_existing, kp_new, desc_existing, desc_
     matches = pred['matches0'][0].cpu().numpy()
 
     # Extract valid matches (i.e. indices where the match is not -1).
-    valid_indices = np.where(matches > -1)[0]
+    all_valid_indices = np.where(matches > -1)[0]
 
-    # Only consider indices that have an associated 3D point.
-    valid_indices = valid_indices[valid_indices < pts3d_existing.shape[0]]
+    # Only consider indices that have an associated 3D point. TODO: what is the correspondence between indices and 3d points? Seems wrong
+    valid_indices = [idx for idx in all_valid_indices if idx in valid_kp_indices]
     if len(valid_indices) < 6:
         raise ValueError("Not enough matches for PnP after filtering valid indices.")
+
+    # Build a mapping from keypoint index in kp_existing to its corresponding index in pts3d_existing.
+    kp_to_3d_mapping = {kp_idx: i for i, kp_idx in enumerate(valid_kp_indices)}
 
     pts3d_corr = []
     pts2d_corr = []
     for idx in valid_indices:
         match_idx = int(matches[idx])
-        pts3d_corr.append(pts3d_existing[idx])
+        # Retrieve the corresponding 3D point using the mapping.
+        pts3d_corr.append(pts3d_existing[kp_to_3d_mapping[idx]])
         pts2d_corr.append(kp_new[match_idx])
     pts3d_corr = np.array(pts3d_corr, dtype=np.float32)
     pts2d_corr = np.array(pts2d_corr, dtype=np.float32)
@@ -145,6 +153,13 @@ def register_new_image(kp_existing, pts3d_existing, kp_new, desc_existing, desc_
     # Compute the camera pose using RANSAC-based PnP.
     success, rvec, tvec, inliers = cv2.solvePnPRansac(pts3d_corr, pts2d_corr, K, None)
     if not success:
+        degenerate, eigen_ratio, eigvals = check_spatial_distribution(pts3d_corr, threshold_ratio=0.1,
+                                                                      min_eig_threshold=1e-3)
+        if degenerate:
+            print("Degenerate configuration detected.")
+            print("Eigenvalue ratio: {:.4f}".format(eigen_ratio))
+            print("Eigenvalues:", eigvals)
+
         raise RuntimeError("PnP failed to compute camera pose.")
     R_new, _ = cv2.Rodrigues(rvec)
     return R_new, tvec, inliers, matches

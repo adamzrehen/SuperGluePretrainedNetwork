@@ -7,9 +7,9 @@ import os
 def generate_image_pairs(n: int, output_path: str):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, 'w') as f:
-        for i in range(1, n):
+        for i in range(1, n - 30):
             img1 = f"{i:07d}.png"
-            img2 = f"{i + 1:07d}.png"
+            img2 = f"{i + 30 + 1:07d}.png"
             f.write(f"{img1} {img2}\n")
 
 
